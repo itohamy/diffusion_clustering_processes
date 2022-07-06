@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # pylint: skip-file
-"""Training and evaluation for score-based generative models. """
+"""Training and evaluation for score-based mixture model. """
 
 import gc
 import io
