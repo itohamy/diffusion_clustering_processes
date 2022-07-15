@@ -21,6 +21,7 @@ output_cifar10_ddpm/
 output*/
 output_cifar10_ncsnpp_cont_with_our_loss/
 output_fashionmnist_ncsnpp_cont/
+test/data
 
 log
 log.log

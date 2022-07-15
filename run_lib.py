@@ -31,7 +31,7 @@ import losses
 import sampling
 from models import utils as mutils
 from models.ema import ExponentialMovingAverage
-import datasets
+import SDE.diffusion_clustering_processes.datasets as datasets
 import evaluation
 import likelihood
 import sde_lib
@@ -87,11 +87,20 @@ def train(config, workdir):
   state = restore_checkpoint(checkpoint_meta_dir, state, config.device)
   initial_step = int(state['step'])
 
-  # Build data iterators
-  train_ds, eval_ds, _ = datasets.get_dataset(config,
-                                              uniform_dequantization=config.data.uniform_dequantization)
-  train_iter = iter(train_ds)  # pytype: disable=wrong-arg-types
-  eval_iter = iter(eval_ds)  # pytype: disable=wrong-arg-types
+ # --------- Build data iterators ----------
+  train_dataset, _ = datasets.get_dataset(config, is_train=True, uniform_dequantization=False)
+  eval_dataset, _ = datasets.get_dataset(config, is_train=False, uniform_dequantization=False)
+
+  batch_sampler_train = datasets.MultipleDatasetsBatchSampler(config, train_dataset.targets, is_train=True)
+  batch_sampler_eval = datasets.MultipleDatasetsBatchSampler(config, eval_dataset.targets, is_train=False)
+
+  train_loader = torch.utils.data.DataLoader(train_dataset, batch_sampler=batch_sampler_train, num_workers=config.data.nworkers, pin_memory=True)
+  eval_loader = torch.utils.data.DataLoader(eval_dataset, batch_sampler=batch_sampler_eval, num_workers=config.data.nworkers, pin_memory=True)
+
+  train_iter = iter(train_loader)
+  eval_iter = iter(eval_loader)
+  # -----------------------------------------
+  
   # Create data normalizer and its inverse
   scaler = datasets.get_data_scaler(config)
   inverse_scaler = datasets.get_data_inverse_scaler(config)
@@ -140,9 +149,13 @@ def train(config, workdir):
     #print(torch.cuda.memory_summary(device=None, abbreviated=False))
     torch.cuda.memory_summary(device=None, abbreviated=False)
 
-    # Convert data to JAX arrays and normalize them. Use ._numpy() to avoid copy.
-    batch = torch.from_numpy(next(train_iter)['image']._numpy()).to(config.device).float()
-    batch = batch.permute(0, 3, 1, 2)
+    # Get next batch:
+    B = config.training.batch_size
+    X_next, C_next = next(train_iter).to(config.device).float()
+    X = torch.reshape(X_next, (B, -1, config.data.num_channels, config.data.image_size, config.data.image_size))  # shape: [B, N, D]
+    C = torch.reshape(C_next, (B, -1)) # shape: [B, N]
+
+    batch = batch.permute(0, 3, 1, 2)   # !!!! Need to fit to our training step.
     batch = scaler(batch)
 
     # Execute one training step
@@ -158,10 +171,14 @@ def train(config, workdir):
 
     # Report the loss on an evaluation dataset periodically
     if step % config.training.eval_freq == 0:
-      eval_batch = torch.from_numpy(next(eval_iter)['image']._numpy()).to(config.device).float()
-      eval_batch = eval_batch.permute(0, 3, 1, 2)
-      eval_batch = scaler(eval_batch)
-      eval_loss = eval_step_fn(state, eval_batch)
+      B = config.evaluate.batch_size
+      X_next, C_next = next(eval_iter).to(config.device).float()
+      X_eval = torch.reshape(X_next, (B, -1, config.data.num_channels, config.data.image_size, config.data.image_size))
+      C_eval = torch.reshape(C_next, (B, -1))
+
+      # eval_batch = eval_batch.permute(0, 3, 1, 2)  # !!!! Need to fit to our eval step.
+      X_eval = scaler(X_eval)
+      eval_loss = eval_step_fn(state, X_eval)
       logging.info("step: %d, eval_loss: %.5e" % (step, eval_loss.item()))
       writer.add_scalar("eval_loss", eval_loss.item(), step)
 
