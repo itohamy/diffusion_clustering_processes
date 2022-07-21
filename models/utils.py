@@ -141,35 +141,35 @@ def get_score_fn(sde, model, train=False, continuous=False):
   model_fn = get_model_fn(model, train=train)
 
   if isinstance(sde, sde_lib.VPSDE) or isinstance(sde, sde_lib.subVPSDE):
-    def score_fn(x, t):
+    def score_fn(x, Z, t):
       # Scale neural network output by standard deviation and flip sign
       if continuous or isinstance(sde, sde_lib.subVPSDE):
         # For VP-trained models, t=0 corresponds to the lowest noise level
         # The maximum value of time embedding is assumed to 999 for
         # continuously-trained models.
-        labels = t * 999
-        score = model_fn(x, labels)
+        t_labels = t * 999
+        score = model_fn(x, Z, t_labels)
         std = sde.marginal_prob(torch.zeros_like(x), t)[1]
       else:
         # For VP-trained models, t=0 corresponds to the lowest noise level
-        labels = t * (sde.N - 1)
-        score = model_fn(x, labels)
-        std = sde.sqrt_1m_alphas_cumprod.to(labels.device)[labels.long()]
+        t_labels = t * (sde.N - 1)
+        score = model_fn(x, Z, t_labels)
+        std = sde.sqrt_1m_alphas_cumprod.to(t_labels.device)[t_labels.long()]
 
       score = -score / std[:, None, None, None]
       return score
 
   elif isinstance(sde, sde_lib.VESDE):
-    def score_fn(x, t):
+    def score_fn(X, Z, t):
       if continuous:
-        labels = sde.marginal_prob(torch.zeros_like(x), t)[1]
+        t_labels = sde.marginal_prob(torch.zeros_like(Z), t)[1]  # Get the std that were used when perturbing Z at time t
       else:
         # For VE-trained models, t=0 corresponds to the highest noise level
-        labels = sde.T - t
-        labels *= sde.N - 1
-        labels = torch.round(labels).long()
+        t_labels = sde.T - t
+        t_labels *= sde.N - 1
+        t_labels = torch.round(t_labels).long()
 
-      score = model_fn(x, labels)
+      score = model_fn(X, Z, t_labels)  
       return score
 
   else:

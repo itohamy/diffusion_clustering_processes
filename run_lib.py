@@ -26,7 +26,7 @@ import tensorflow as tf
 import tensorflow_gan as tfgan
 import logging
 # Keep the import below for registering all model definitions
-from models import ddpm, ncsnv2, ncsnpp
+# from models import ddpm, ncsnv2, ncsnpp
 import losses
 import sampling
 from models import utils as mutils
@@ -65,7 +65,7 @@ def train(config, workdir):
   writer = tensorboard.SummaryWriter(tb_dir)
 
   # Initialize model.
-  score_model = mutils.create_model(config)
+  score_model = mutils.create_model(config)  # This is an instance of "diff_clustering_model"
 
   #summary(score_model, (3, 32, 32))
   #print(score_model)
@@ -123,10 +123,10 @@ def train(config, workdir):
   continuous = config.training.continuous
   reduce_mean = config.training.reduce_mean
   likelihood_weighting = config.training.likelihood_weighting
-  train_step_fn = losses.get_step_fn(sde, train=True, optimize_fn=optimize_fn,
+  train_step_fn = losses.get_step_fn(config, sde, train=True, optimize_fn=optimize_fn,
                                      reduce_mean=reduce_mean, continuous=continuous,
                                      likelihood_weighting=likelihood_weighting)
-  eval_step_fn = losses.get_step_fn(sde, train=False, optimize_fn=optimize_fn,
+  eval_step_fn = losses.get_step_fn(config, sde, train=False, optimize_fn=optimize_fn,
                                     reduce_mean=reduce_mean, continuous=continuous,
                                     likelihood_weighting=likelihood_weighting)
 
@@ -152,14 +152,14 @@ def train(config, workdir):
     # Get next batch:
     B = config.training.batch_size
     X_next, C_next = next(train_iter).to(config.device).float()
-    X = torch.reshape(X_next, (B, -1, config.data.num_channels, config.data.image_size, config.data.image_size))  # shape: [B, N, D]
+    X = torch.reshape(X_next, (B, -1, config.data.num_channels, config.data.image_size, config.data.image_size))  # shape: [B, N, nc, img_sz, img_sz]
     C = torch.reshape(C_next, (B, -1)) # shape: [B, N]
 
-    batch = batch.permute(0, 3, 1, 2)   # !!!! Need to fit to our training step.
-    batch = scaler(batch)
+    # batch = batch.permute(0, 3, 1, 2)   # !!!! Need to fit to our training step.
+    X = scaler(X)
 
     # Execute one training step
-    loss = train_step_fn(state, batch)
+    loss = train_step_fn(state, X, C)
     
     if step % config.training.log_freq == 0:
       logging.info("step: %d, training_loss: %.5e" % (step, loss.item()))

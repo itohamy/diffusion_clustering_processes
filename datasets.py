@@ -186,6 +186,7 @@ class MultipleDatasetsBatchSampler():
 
       while self.count + self.B < self.n_dataset:
         N = random.randint(self.N_min, self.N_max)
+        K 
         indices = []  # will be in shape: [B*N] and will include B sets of indices, each set is of size N.
 
         for i in range(self.B):

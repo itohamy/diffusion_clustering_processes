@@ -21,6 +21,7 @@ import torch.optim as optim
 import numpy as np
 from models import utils as mutils
 from sde_lib import VESDE, VPSDE
+from models.mapping_labels_to_cont import MappingToContinuous
 
 
 def get_optimizer(config, params):
@@ -52,7 +53,63 @@ def optimization_manager(config):
   return optimize_fn
 
 
-def get_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_weighting=True, eps=1e-5):
+def get_sde_loss_fn(config, sde, train, reduce_mean=True, continuous=True, likelihood_weighting=True, eps=1e-5):
+  """Create a loss function for training with arbirary SDEs.
+
+  Args:
+    sde: An `sde_lib.SDE` object that represents the forward SDE.
+    train: `True` for training loss and `False` for evaluation loss.
+    reduce_mean: If `True`, average the loss across data dimensions. Otherwise sum the loss across data dimensions.
+    continuous: `True` indicates that the model is defined to take continuous time steps. Otherwise it requires
+      ad-hoc interpolation to take continuous time steps.
+    likelihood_weighting: If `True`, weight the mixture of score matching losses
+      according to https://arxiv.org/abs/2101.09258; otherwise use the weighting recommended in our paper.
+    eps: A `float` number. The smallest time step to sample from.
+
+  Returns:
+    A loss function.
+  """
+  reduce_op = torch.mean if reduce_mean else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
+  map_to_continuous = MappingToContinuous(config)
+
+  def loss_fn(model, X, C):
+    """Compute the loss function.
+
+    Args:
+      model: A score model.
+      X: A mini-batch of training data. shape: [B, N, nc, img_sz, img_sz]
+      C: ground-truth labels of X. shape: [B, N]
+      Z: continuous mapping of C. shape: [B, N, K]
+
+    Returns:
+      loss: A scalar that represents the average loss value across the mini-batch.
+    """
+
+    # Convert C (discrete space) to Z (continouos space):
+    Z = map_to_continuous(C)  # shape: [B, N, K]
+
+    score_fn = mutils.get_score_fn(sde, model, train=train, continuous=continuous)
+    t = torch.rand(Z.shape[0], device=X.device) * (sde.T - eps) + eps  # Shape: [B]
+    e = torch.randn_like(Z)  # Shape: [B, N, K]
+    mean, std = sde.marginal_prob(Z, t)  # mean is equal to Z, shape: [B, N, K]; std is the std used to create the noise for each entry in Z, in shapes: [B]
+    perturbed_Z = mean + std[:, None, None] * e
+    score = score_fn(X, perturbed_Z, t)  # Here the model is actually running
+
+    if not likelihood_weighting:
+      losses = torch.square(score * std[:, None, None] + e)
+      losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1)
+    else:
+      g2 = sde.sde(torch.zeros_like(X), t)[1] ** 2
+      losses = torch.square(score + e / std[:, None, None])
+      losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1) * g2
+
+    loss = torch.mean(losses)
+    return loss
+
+  return loss_fn
+
+
+def OLD_get_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_weighting=True, eps=1e-5):
   """Create a loss function for training with arbirary SDEs.
 
   Args:
@@ -70,28 +127,29 @@ def get_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_we
   """
   reduce_op = torch.mean if reduce_mean else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
 
-  def loss_fn(model, batch):
+  def loss_fn(model, X, C):
     """Compute the loss function.
 
     Args:
       model: A score model.
-      batch: A mini-batch of training data.
+      X: A mini-batch of training data. shape: [B, N, nc, img_sz, img_sz]
+      C: ground-truth labels of X. shape: [B, N]
 
     Returns:
       loss: A scalar that represents the average loss value across the mini-batch.
     """
     score_fn = mutils.get_score_fn(sde, model, train=train, continuous=continuous)
-    t = torch.rand(batch.shape[0], device=batch.device) * (sde.T - eps) + eps
-    z = torch.randn_like(batch)
-    mean, std = sde.marginal_prob(batch, t)
+    t = torch.rand(X.shape[0], device=X.device) * (sde.T - eps) + eps
+    z = torch.randn_like(X)
+    mean, std = sde.marginal_prob(X, t)
     perturbed_data = mean + std[:, None, None, None] * z
-    score = score_fn(perturbed_data, t)
+    score = score_fn(perturbed_data, t)  # Here the model is actually running
 
     if not likelihood_weighting:
       losses = torch.square(score * std[:, None, None, None] + z)
       losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1)
     else:
-      g2 = sde.sde(torch.zeros_like(batch), t)[1] ** 2
+      g2 = sde.sde(torch.zeros_like(X), t)[1] ** 2
       losses = torch.square(score + z / std[:, None, None, None])
       losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1) * g2
 
@@ -111,11 +169,11 @@ def get_smld_loss_fn(vesde, train, reduce_mean=False):
 
   def loss_fn(model, batch):
     model_fn = mutils.get_model_fn(model, train=train)
-    labels = torch.randint(0, vesde.N, (batch.shape[0],), device=batch.device)
-    sigmas = smld_sigma_array.to(batch.device)[labels]
+    labels = torch.randint(0, vesde.N, (batch.shape[0],), device=batch.device)  # shape: [N]. This is the times t=1,...,L where we perturb the data with increasing noise.
+    sigmas = smld_sigma_array.to(batch.device)[labels]  # should be shape [N]
     noise = torch.randn_like(batch) * sigmas[:, None, None, None]  # same as batch size, where in row i there is noise using some sigma that will be added to data point in row i.
     perturbed_data = noise + batch
-    score = model_fn(perturbed_data, labels)  # What is the shape here?? why need labels?
+    score = model_fn(perturbed_data, labels)  # labels are the std used to perturb the data.
     target = -noise / (sigmas ** 2)[:, None, None, None]
     losses = torch.square(score - target)
     losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1) * sigmas ** 2
@@ -148,7 +206,7 @@ def get_ddpm_loss_fn(vpsde, train, reduce_mean=True):
   return loss_fn
 
 
-def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True, likelihood_weighting=False):
+def get_step_fn(config, sde, train, optimize_fn=None, reduce_mean=False, continuous=True, likelihood_weighting=False):
   """Create a one-step training/evaluation function.
 
   Args:
@@ -163,7 +221,7 @@ def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True
     A one-step function for training or evaluation.
   """
   if continuous:
-    loss_fn = get_sde_loss_fn(sde, train, reduce_mean=reduce_mean,
+    loss_fn = get_sde_loss_fn(config, sde, train, reduce_mean=reduce_mean,
                               continuous=True, likelihood_weighting=likelihood_weighting)
   else:
     assert not likelihood_weighting, "Likelihood weighting is not supported for original SMLD/DDPM training."
@@ -174,7 +232,7 @@ def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True
     else:
       raise ValueError(f"Discrete training for {sde.__class__.__name__} is not recommended.")
 
-  def step_fn(state, batch):
+  def step_fn(state, X, C):
     """Running one step of training or evaluation.
 
     This function will undergo `jax.lax.scan` so that multiple steps can be pmapped and jit-compiled together
@@ -183,7 +241,8 @@ def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True
     Args:
       state: A dictionary of training information, containing the score model, optimizer,
        EMA status, and number of optimization steps.
-      batch: A mini-batch of training/evaluation data.
+       X: A mini-batch of training/evaluation data. shape: [B, N, nc, img_sz, img_sz]
+       C: ground-truth labels of X. shape: [B, N]
 
     Returns:
       loss: The average loss value of this state.
@@ -192,7 +251,7 @@ def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True
     if train:
       optimizer = state['optimizer']
       optimizer.zero_grad()
-      loss = loss_fn(model, batch)
+      loss = loss_fn(model, X, C)
       loss.backward()
       optimize_fn(optimizer, model.parameters(), step=state['step'])
       state['step'] += 1
@@ -202,7 +261,7 @@ def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True
         ema = state['ema']
         ema.store(model.parameters())
         ema.copy_to(model.parameters())
-        loss = loss_fn(model, batch)
+        loss = loss_fn(model, X, C)
         ema.restore(model.parameters())
 
     return loss

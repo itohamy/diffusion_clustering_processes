@@ -49,6 +49,7 @@ def get_default_configs():
   data.N_max = 64  # the maximum size of a dataset (as an entry in the batch)
   data.data_dir = 'data/FASHIONMNIST'
   data.nworkers = 15
+  data.nlabels = 10
 
   # model
   config.model = model = ml_collections.ConfigDict()
@@ -69,6 +70,16 @@ def get_default_configs():
   optim.eps = 1e-8
   optim.warmup = 5000
   optim.grad_clip = 1.
+
+  # Feature Extraction
+  config.encoder = encoder = ml_collections.ConfigDict()
+  encoder.type = 'resnet18'  # options: {'resnet18', 'resnet50'}
+  encoder.output_dim = 128
+
+  # Mapping discrete labels to continouos space:
+  config.mapping_to_cont = mapping_to_cont = ml_collections.ConfigDict()
+  mapping_to_cont.mu = 1.0
+  mapping_to_cont.sigma = 0.1
 
   config.seed = 42
   config.device = torch.device('cuda:1') if torch.cuda.is_available() else torch.device('cpu')
