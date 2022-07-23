@@ -9,10 +9,17 @@ class ScoreNetwork(nn.Module):
         super(ScoreNetwork, self).__init__()
 
 
+    def forward(self, ZcondX, t):
+        ''' ZcondX: [B, N, K, H]
+            t: the embedded sigmas that were used to perturb Z. Shape: [B, H]. 
+            score (output): should match the score function of p(Z(t)|X). Shape: [B, N, K]
+        '''
 
-    def forward(self, Q, t):
-        '''  '''
-        return
+        
+
+        score = None  # shape: [B, N, K]
+
+        return score
 
 
 

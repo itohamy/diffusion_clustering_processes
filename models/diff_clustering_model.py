@@ -61,7 +61,7 @@ class DiffClustering(nn.Module):
         t = self.fc3_t_expansion(t)  # shape: [B, H]
 
         # Score network: input: ZcondX: [B, N, K, H] and t: [B, H]. Output: score: [B, N, K]
-        score = self.score_net(ZcondX, t)
-
+        score = self.score_net(ZcondX, t)  # shape: [B, N, K]
+        
         return score
 
