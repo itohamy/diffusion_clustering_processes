@@ -61,6 +61,8 @@ def get_default_configs():
   model.beta_max = 20.
   model.dropout = 0.1
   model.embedding_type = 'fourier'
+  model.q = 32  # Z expanded dim before pre-processing
+  model.H = 128  # Z|X expanded dim after pre-processing
 
   # optimization
   config.optim = optim = ml_collections.ConfigDict()
