@@ -47,6 +47,7 @@ def get_default_configs():
   data.num_channels = 1
   data.N_min = 10  # the minimum size of a dataset (as an entry in the batch)
   data.N_max = 64  # the maximum size of a dataset (as an entry in the batch)
+  data.K_min = 2  # the minimum number of clusters within one dataset in each entry in the batch.
   data.data_dir = 'data/FASHIONMNIST'
   data.nworkers = 15
   data.nlabels = 10

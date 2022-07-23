@@ -88,6 +88,7 @@ def get_sde_loss_fn(config, sde, train, reduce_mean=True, continuous=True, likel
     # Convert C (discrete space) to Z (continouos space):
     Z = map_to_continuous(C)  # shape: [B, N, K]
 
+    # Z perturbation:
     score_fn = mutils.get_score_fn(sde, model, train=train, continuous=continuous)
     t = torch.rand(Z.shape[0], device=X.device) * (sde.T - eps) + eps  # Shape: [B]
     e = torch.randn_like(Z)  # Shape: [B, N, K]

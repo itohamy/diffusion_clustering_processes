@@ -162,6 +162,7 @@ class MultipleDatasetsBatchSampler():
     def __init__(self, config, labels, is_train=True):
         self.N_min = config.data.N_min
         self.N_max = config.data.N_max
+        self.K_min = config.data.K_min
 
         if is_train:
           self.B = config.training.batch_size
@@ -170,7 +171,7 @@ class MultipleDatasetsBatchSampler():
 
         self.labels = labels  # shape: [number of points in the whole dataset,], contains the labels of each point in the dataset according to the order the in the dataset.
         self.labels_set = list(set(self.labels.numpy()))
-        self.K = len(self.labels_set)
+        self.nlabels = len(self.labels_set)  # Number of labels we have in the dataset.
         self.label_to_indices = {label: np.where(self.labels.numpy() == label)[0]
                                  for label in self.labels_set}
         
@@ -186,18 +187,21 @@ class MultipleDatasetsBatchSampler():
 
       while self.count + self.B < self.n_dataset:
         N = random.randint(self.N_min, self.N_max)
-        K 
+        K_max = min(N, self.nlabels)
+        K = random.randint(self.K_min, K_max)
+        K_labels = np.random.choice(self.nlabels, K, replace=False)  # Draw the original K label values that will participate each dataset in the batch.
         indices = []  # will be in shape: [B*N] and will include B sets of indices, each set is of size N.
-
+        
+        # For each B_i, create indices that will form the datapoints of the small dataset in entry i in the batch:
         for i in range(self.B):
-          # For each B_i, create indices that will form the datapoints of the small dataset in entry i in the batch:
-          dirichlet_sample = np.random.dirichlet(np.ones(self.K))
+
+          dirichlet_sample = np.random.dirichlet(np.ones(K))
           multinomial_sample = np.random.multinomial(N, dirichlet_sample) # shape [K,] contains the count of datapoints to sample per label. Sum(multinomial_sample) = N.
 
           B_i_indices = []
           for j in range(multinomial_sample.shape[0]):
             n = multinomial_sample[j]
-            lbl = self.labels_set[j]
+            lbl = K_labels[j]
 
             if self.used_label_indices_count[lbl] + n > len(self.label_to_indices[lbl]):
               np.random.shuffle(self.label_to_indices[lbl])
