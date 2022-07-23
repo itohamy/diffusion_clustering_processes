@@ -10,7 +10,7 @@ class ScoreNetwork(nn.Module):
 
 
 
-    def forward(self, X):
+    def forward(self, Q, t):
         '''  '''
         return
 

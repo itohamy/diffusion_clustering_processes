@@ -15,7 +15,7 @@ class DiffClustering(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.encoder = Encoder(config).to(self.device)
-        self.preprocess = PreProcess(config).to(self.device) # TBD
+        self.preprocess = PreProcess(config).to(self.device) # TBD !!!!! CONTINUE HERE !!!!
         self.score_net = ScoreNetwork(config).to(self.device) # TBD
         self.fc1 = None # TBD
         self.fc2 = None # TBD
